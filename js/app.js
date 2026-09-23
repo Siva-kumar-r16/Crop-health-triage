@@ -4,7 +4,7 @@
 ===================================================== */
 
 const API_BASE_URL =
-    "https://naturals-make-evaluate-optical.trycloudflare.com";
+    "https://autumn-divided-tramadol-fragrance.trycloudflare.com";
 
 const PREDICT_URL =
     `${API_BASE_URL}/predict`;
