@@ -4,7 +4,7 @@
 ===================================================== */
 
 const API_BASE_URL =
-    "https://redhead-makeup-individually-convinced.trycloudflare.com";
+    "https://naturals-make-evaluate-optical.trycloudflare.com";
 
 const PREDICT_URL =
     `${API_BASE_URL}/predict`;
