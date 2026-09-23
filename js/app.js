@@ -4,7 +4,7 @@
 ===================================================== */
 
 const API_BASE_URL =
-    "https://remedies-medication-til-backed.trycloudflare.com/";
+    "https://remedies-medication-til-backed.trycloudflare.com";
 
 const PREDICT_URL =
     `${API_BASE_URL}/predict`;
