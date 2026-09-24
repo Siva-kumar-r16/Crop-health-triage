@@ -6,23 +6,24 @@ from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, File, UploadFile, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError, ImageFile
 import torch
 import torch.nn as nn
 from torchvision import transforms, models
 import uvicorn
 
-# ============================================================
-# Application Setup & CORS
-# ============================================================
+# Allow truncated image bytes to be read safely without crashing
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+# ============================================================
+# API Application Setup
+# ============================================================
 app = FastAPI(
     title="AI Crop Disease Triage API",
-    description="Backend API powered by MobileNetV3-Small for 38-class crop disease detection",
-    version="2.0.0"
+    description="Two-stage MobileNetV3 Triage Pipeline (OOD Rejection -> 38-Class Disease Detection)",
+    version="3.0.0"
 )
 
-# Development CORS configuration allowing web clients and Android apps
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,19 +33,30 @@ app.add_middleware(
 )
 
 # ============================================================
-# Global Variables and Configuration
+# Global Configuration & Thresholds
 # ============================================================
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pth")
-CLASS_MAPPING_PATH = os.path.join(BASE_DIR, "model", "class_names.json")
+MODEL_DIR = os.path.join(BASE_DIR, "model")
+
+LEAF_MODEL_PATH = os.path.join(MODEL_DIR, "leaf_classifier.pth")
+LEAF_MAP_PATH = os.path.join(MODEL_DIR, "leaf_class_names.json")
+
+DISEASE_MODEL_PATH = os.path.join(MODEL_DIR, "best_model.pth")
+DISEASE_MAP_PATH = os.path.join(MODEL_DIR, "class_names.json")
+
 DISEASE_INFO_PATH = os.path.join(BASE_DIR, "disease_info.json")
 
-CONFIDENCE_THRESHOLD = 0.60  # 60% rule
+LEAF_CONFIDENCE_THRESHOLD = 0.70
+DISEASE_CONFIDENCE_THRESHOLD = 0.60
 
+# Device selection (Render Free uses CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model: Optional[nn.Module] = None
-class_mapping: Dict[int, str] = {}
+
+# Globals for caching models in memory
+leaf_model: Optional[nn.Module] = None
+disease_model: Optional[nn.Module] = None
+leaf_classes: Dict[int, str] = {}
+disease_classes: Dict[int, str] = {}
 disease_info_db: Dict[str, Any] = {}
 
 # Exact preprocessing transforms matching training pipeline
@@ -60,12 +72,8 @@ inference_transforms = transforms.Compose([
 # ============================================================
 # Helper Functions
 # ============================================================
-
 def parse_label(class_label: str):
-    """
-    Parses PlantVillage formatted label into plant name, disease name, and health status.
-    Example: 'Apple___Black_rot' -> ('Apple', 'Black rot', 'diseased')
-    """
+    """Parses PlantVillage label into plant name and disease name."""
     parts = class_label.split("___")
     plant = parts[0].replace("_", " ").strip()
     disease = parts[1].replace("_", " ").strip() if len(parts) > 1 else None
@@ -74,84 +82,89 @@ def parse_label(class_label: str):
         return plant, None, "healthy"
     return plant, disease, "diseased"
 
-
 def get_confidence_level(score: float) -> str:
-    """Classifies confidence into qualitative levels."""
-    if score >= 0.80:
-        return "high"
-    elif score >= 0.60:
-        return "medium"
+    """Classifies confidence into qualitative tiers."""
+    if score >= 0.80: return "high"
+    elif score >= 0.60: return "medium"
     return "low"
 
-# ============================================================
-# Lifecycle Startup
-# ============================================================
-
-@app.on_event("startup")
-def load_assets():
-    """Load model, class mapping, and disease knowledge base once on startup."""
-    global model, class_mapping, disease_info_db
-
-    print(f"Initializing service on device: {device}")
-
-    # 1. Load Class Mapping
-    if not os.path.exists(CLASS_MAPPING_PATH):
-        raise FileNotFoundError(f"Class mapping file not found at {CLASS_MAPPING_PATH}")
-    with open(CLASS_MAPPING_PATH, "r", encoding="utf-8") as f:
-        raw_mapping = json.load(f)
-        class_mapping = {int(k): v for k, v in raw_mapping.items()}
-
-    num_classes = len(class_mapping)
-    print(f"Loaded {num_classes} classes from {CLASS_MAPPING_PATH}")
-
-    # 2. Load Disease Information Database
-    if not os.path.exists(DISEASE_INFO_PATH):
-        raise FileNotFoundError(f"Disease info file not found at {DISEASE_INFO_PATH}")
-    with open(DISEASE_INFO_PATH, "r", encoding="utf-8") as f:
-        disease_info_db = json.load(f)
-    print(f"Loaded disease database with {len(disease_info_db)} entries.")
-
-    # 3. Load Trained Model
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Model weights not found at {MODEL_PATH}")
-
+def load_mobile_net(weights_path: str, num_classes: int) -> nn.Module:
+    """Instantiates MobileNetV3-Small and maps saved weights securely."""
+    if not os.path.exists(weights_path):
+        raise FileNotFoundError(f"Model file missing: {weights_path}")
+        
     model = models.mobilenet_v3_small(weights=None)
-    in_features = model.classifier[3].in_features
-    model.classifier[3] = nn.Linear(in_features, num_classes)
-
-    state_dict = torch.load(MODEL_PATH, map_location=device)
-    model.load_state_dict(state_dict)
-    model.to(device)
+    model.classifier[3] = nn.Linear(model.classifier[3].in_features, num_classes)
+    model.load_state_dict(torch.load(weights_path, map_location=device))
+    model = model.to(device)
     model.eval()
-    print("MobileNetV3-Small loaded successfully in evaluation mode.")
+    return model
+
+def load_json_mapping(filepath: str) -> Dict[int, str]:
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Mapping file missing: {filepath}")
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {int(k): v for k, v in data.items()}
+
+# ============================================================
+# Server Startup Lifecycle
+# ============================================================
+@app.on_event("startup")
+def startup_event():
+    """Loads all models and mappings exactly ONCE during boot."""
+    global leaf_model, disease_model, leaf_classes, disease_classes, disease_info_db
+
+    print(f"--- Booting Server on Device: {device} ---")
+
+    # 1. Load Mappings & Disease Knowledge
+    leaf_classes = load_json_mapping(LEAF_MAP_PATH)
+    disease_classes = load_json_mapping(DISEASE_MAP_PATH)
+    
+    # Verify LEAF map integrity
+    leaf_vals = set(leaf_classes.values())
+    if "LEAF" not in leaf_vals or "NOT_LEAF" not in leaf_vals:
+        raise ValueError(f"CRITICAL: Invalid leaf mapping. Found {leaf_vals}")
+
+    if not os.path.exists(DISEASE_INFO_PATH):
+        print(f"Warning: Disease info database missing at {DISEASE_INFO_PATH}")
+    else:
+        with open(DISEASE_INFO_PATH, "r", encoding="utf-8") as f:
+            disease_info_db = json.load(f)
+
+    # 2. Load Models into Memory
+    print("Loading Leaf OOD Classifier...")
+    leaf_model = load_mobile_net(LEAF_MODEL_PATH, 2)
+    
+    print("Loading 38-Class Disease Classifier...")
+    disease_model = load_mobile_net(DISEASE_MODEL_PATH, 38)
+    
+    print("--- Models Loaded Successfully! ---")
 
 # ============================================================
 # API Endpoints
 # ============================================================
-
 @app.get("/")
 def root():
     return {
         "success": True,
         "service": "AI Crop Disease Triage API",
-        "status": "online",
-        "device": str(device),
-        "classes_loaded": len(class_mapping)
+        "status": "online"
     }
-
 
 @app.get("/health")
 def health():
     return {
         "success": True,
         "status": "healthy",
-        "model_ready": model is not None
+        "leaf_model_loaded": leaf_model is not None,
+        "disease_model_loaded": disease_model is not None,
+        "device": str(device)
     }
-
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # 1. Validate file presence & type
+    # 1. Validate File Upload
     if not file or not file.filename:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -161,113 +174,124 @@ async def predict(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith("image/"):
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"success": False, "error": "Uploaded file must be a valid image (e.g., JPEG, PNG)."}
+            content={"success": False, "error": "Uploaded file must be a valid image."}
         )
 
-    # 2. Read and decode image safely
+    # 2. Decode Image Safely
     try:
         image_bytes = await file.read()
-        if len(image_bytes) == 0:
+        if not image_bytes:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                content={"success": False, "error": "Uploaded image file is empty."}
+                content={"success": False, "error": "Empty image file."}
             )
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    except (UnidentifiedImageError, ValueError):
+    except (UnidentifiedImageError, ValueError, Exception):
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"success": False, "error": "Corrupted or unreadable image file."}
-        )
-    except Exception:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"success": False, "error": "Internal server error while processing image."}
+            content={"success": False, "error": "Corrupted or unreadable image format."}
         )
 
-    # 3. Model Preprocessing
+    # 3. CPU/GPU Inference Block
     try:
         tensor = inference_transforms(image).unsqueeze(0).to(device)
     except Exception:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"success": False, "error": "Image transform preprocessing failed."}
+            content={"success": False, "error": "Image tensor preprocessing failed."}
         )
 
-    # 4. PyTorch Inference (No gradients)
     with torch.no_grad():
-        outputs = model(tensor)
-        probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+        # --- STAGE 1: LEAF CLASSIFIER (OOD REJECTION) ---
+        l_outputs = leaf_model(tensor)
+        l_probs = torch.nn.functional.softmax(l_outputs[0], dim=0)
+        l_conf, l_idx = torch.max(l_probs, 0)
+        
+        leaf_prediction = leaf_classes[l_idx.item()]
+        leaf_confidence = round(float(l_conf.item()), 4)
 
-    # 5. Extract Top-3 Predictions
-    top_k_prob, top_k_idx = torch.topk(probabilities, 3)
-    top_k_prob = top_k_prob.cpu().numpy().tolist()
-    top_k_idx = top_k_idx.cpu().numpy().tolist()
+        if leaf_prediction == "NOT_LEAF" or leaf_confidence < LEAF_CONFIDENCE_THRESHOLD:
+            return {
+                "success": True,
+                "status": "not_leaf",
+                "message": "Please upload a clear photo of a crop leaf.",
+                "leaf_prediction": "NOT_LEAF",
+                "leaf_confidence": leaf_confidence
+            }
 
-    top_predictions: List[Dict[str, Any]] = []
-    for prob, idx in zip(top_k_prob, top_k_idx):
-        lbl = class_mapping.get(idx, "Unknown")
-        p_plant, p_disease, _ = parse_label(lbl)
-        top_predictions.append({
-            "class_index": idx,
-            "class_label": lbl,
-            "plant": p_plant,
-            "disease": p_disease,
-            "confidence": round(float(prob), 4),
-            "confidence_percent": round(float(prob) * 100, 2)
+        # --- STAGE 2: DISEASE CLASSIFIER ---
+        d_outputs = disease_model(tensor)
+        d_probs = torch.nn.functional.softmax(d_outputs[0], dim=0)
+        
+        # Get Top-3
+        top_k_prob, top_k_idx = torch.topk(d_probs, 3)
+        top_k_prob = top_k_prob.cpu().numpy().tolist()
+        top_k_idx = top_k_idx.cpu().numpy().tolist()
+
+        best_idx = top_k_idx[0]
+        best_prob = top_k_prob[0]
+        best_label = disease_classes[best_idx]
+
+        top_predictions = []
+        for p, i in zip(top_k_prob, top_k_idx):
+            lbl = disease_classes[i]
+            t_plant, t_dis, _ = parse_label(lbl)
+            top_predictions.append({
+                "class_label": lbl,
+                "plant": t_plant,
+                "disease": t_dis,
+                "confidence": round(float(p), 4),
+                "confidence_percent": round(float(p) * 100, 2)
+            })
+
+        # --- UNCERTAINTY GATE ---
+        if best_prob < DISEASE_CONFIDENCE_THRESHOLD:
+            return {
+                "success": True,
+                "status": "uncertain",
+                "message": "The image is not clear enough for a reliable prediction. Please take another clear photo.",
+                "leaf_prediction": "LEAF",
+                "leaf_confidence": leaf_confidence,
+                "disease_confidence": round(best_prob, 4),
+                "top_predictions": top_predictions
+            }
+
+        # --- FINAL SUCCESS RESPONSE ---
+        plant, disease, health_status = parse_label(best_label)
+        
+        disease_info = disease_info_db.get(best_label, {
+            "name": disease if disease else f"Healthy {plant}",
+            "description": "No detailed information currently available in the database.",
+            "symptoms": [],
+            "causes": [],
+            "prevention": [],
+            "recommended_action": []
         })
 
-    # Top-1 result details
-    top1 = top_predictions[0]
-    top_conf = top1["confidence"]
-    top_label = top1["class_label"]
-    top_index = top1["class_index"]
-    plant, disease, health_status = parse_label(top_label)
-
-    # 6. Apply 60% Confidence Rule
-    if top_conf < CONFIDENCE_THRESHOLD:
         return {
             "success": True,
-            "status": "retake",
-            "message": "The image is not clear enough for a reliable prediction. Please take another clear photo of the leaf.",
-            "confidence": top_conf,
-            "confidence_percent": top1["confidence_percent"],
-            "confidence_threshold": CONFIDENCE_THRESHOLD,
+            "status": health_status,
+            "prediction": {
+                "class_index": best_idx,
+                "class_label": best_label,
+                "plant": plant,
+                "disease": disease,
+                "confidence": round(best_prob, 4),
+                "confidence_percent": round(best_prob * 100, 2),
+                "confidence_level": get_confidence_level(best_prob)
+            },
+            "disease_info": disease_info,
             "top_predictions": top_predictions
         }
 
-    # 7. Fetch Information from Disease Database
-    disease_info = disease_info_db.get(top_label, {
-        "name": disease if disease else f"Healthy {plant}",
-        "description": "No specific database description is available for this class.",
-        "symptoms": [],
-        "causes": [],
-        "prevention": [],
-        "recommended_action": []
-    })
-
-    return {
-        "success": True,
-        "status": health_status,
-        "prediction": {
-            "class_index": top_index,
-            "class_label": top_label,
-            "plant": plant,
-            "disease": disease,
-            "confidence": top_conf,
-            "confidence_percent": top1["confidence_percent"],
-            "confidence_level": get_confidence_level(top_conf)
-        },
-        "disease_info": disease_info,
-        "top_predictions": top_predictions
-    }
-
 # ============================================================
-# Server Execution
+# Local Server Execution
 # ============================================================
-
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
-        app,
+        "main:app",
         host="0.0.0.0",
-        port=8000
+        port=port,
+        reload=True
     )
