@@ -1,0 +1,6 @@
+fastapi>=0.103.1
+uvicorn[standard]>=0.23.2
+python-multipart>=0.0.6
+torch==2.0.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+torchvision==0.15.2+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+Pillow>=10.0.0
