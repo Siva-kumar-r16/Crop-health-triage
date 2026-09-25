@@ -1,0 +1,40 @@
+<resources>
+    <string name="app_name">Crop Disease Triage</string>
+    <string name="crop_health_check">Crop Health Check</string>
+    <string name="home_desc">Take a clear photo of an affected crop leaf to check for possible diseases.</string>
+    <string name="take_photo">Take Photo</string>
+    <string name="choose_gallery">Choose from Gallery</string>
+    <string name="retake">Retake</string>
+    <string name="analyze">Analyze</string>
+    <string name="analyzing_title">Analyzing your crop...</string>
+    <string name="analyzing_step_1">Checking image quality</string>
+    <string name="analyzing_step_2">Analyzing leaf</string>
+    <string name="analyzing_step_3">Identifying possible disease</string>
+    <string name="analyzing_step_4">Checking confidence</string>
+
+    <string name="likely_disease">Likely Disease</string>
+    <string name="confidence_label">Confidence</string>
+    <string name="description_label">Description</string>
+    <string name="causes_label">Causes</string>
+    <string name="symptoms_label">Symptoms</string>
+    <string name="treatment_label">Recommended Action</string>
+    <string name="prevention_label">Prevention</string>
+    <string name="top_predictions_label">Top Predictions</string>
+
+    <string name="ai_disclaimer">This is an AI-based preliminary assessment.</string>
+    <string name="analyze_another">Analyze Another Photo</string>
+    <string name="uncertain_title">Not enough evidence</string>
+    <string name="uncertain_desc">We could not reliably identify the disease.</string>
+    <string name="uncertain_sub">Please take another clear photo.</string>
+    <string name="tips_title">Tips:</string>
+    <string name="tip_1">Good lighting</string>
+    <string name="tip_2">Keep leaf in focus</string>
+    <string name="tip_3">Move closer</string>
+    <string name="tip_4">Avoid shadows</string>
+    <string name="tip_5">Show affected area</string>
+    <string name="error_title">Connection Error</string>
+    <string name="error_desc">Unable to connect to the server.</string>
+    <string name="error_sub">Please check your internet connection and try again.</string>
+    <string name="retry">Retry</string>
+    <string name="back_to_home">Back to Home</string>
+</resources>

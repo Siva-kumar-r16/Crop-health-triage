@@ -1,0 +1,105 @@
+# =========================================================
+# General
+# =========================================================
+
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+credentials.json
+secrets.json
+service-account.json
+service-account*.json
+
+# =========================================================
+# Python / Backend
+# =========================================================
+
+__pycache__/
+*.py[cod]
+*.pyo
+
+.venv/
+venv/
+env/
+ENV/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.log
+
+# Local configuration
+config.local.*
+settings.local.*
+
+# =========================================================
+# Datasets
+# =========================================================
+
+dataset/
+datasets/
+data/
+*.parquet
+*.csv
+*.zip
+*.tar
+*.tar.gz
+
+# =========================================================
+# Android
+# =========================================================
+
+.gradle/
+.idea/
+build/
+*/build/
+
+local.properties
+
+*.iml
+
+.externalNativeBuild/
+.cxx/
+
+captures/
+
+# Android signing
+*.jks
+*.keystore
+
+# =========================================================
+# Node / Web
+# =========================================================
+
+node_modules/
+.npm/
+dist/
+build/
+.cache/
+
+# Local frontend environment
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# =========================================================
+# OS / IDE
+# =========================================================
+
+.vscode/
+*.swp
+*.swo
