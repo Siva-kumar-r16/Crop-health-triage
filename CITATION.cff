@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+title: "Crop Health Triage"
+message: "If you use Crop Health Triage in your work, please cite this repository."
+type: software
+abstract: "AI-powered crop disease triage system using lightweight deep learning with a FastAPI backend, Android mobile application, and web application."
+repository-code: "https://github.com/Siva-kumar-r16/Crop-health-triage"
+url: "https://github.com/Siva-kumar-r16/Crop-health-triage"
+license: MIT
+date-released: 2026-09-25
+version: "1.0.0"
+authors:
+  - family-names: "Kumar R"
+    given-names: "Siva"
+    email: "sirsivakumar@outlook.com"
+    affiliation: "Crop Health Triage Team"
+  - family-names: "Smith S"
+    given-names: "Seprin"
+    email: "seprinsmith4@gmail.com"
+    affiliation: "Crop Health Triage Team"
+  - family-names: "Kevin P"
+    given-names: "Santhana"
+    email: "kevin0412it@gmail.com"
+    affiliation: "Crop Health Triage Team"
+  - family-names: "S M"
+    given-names: "Saminathan"
+    email: "saminathanmurugu2007@gmail.com"
+    affiliation: "Crop Health Triage Team"
+  - family-names: "P"
+    given-names: "Sharan"
+    email: "sharan12318@gmail.com"
+    affiliation: "Crop Health Triage Team"
+keywords:
+  - agriculture
+  - crop disease
+  - machine learning
+  - deep learning
+  - computer vision
+  - plant disease detection
+  - PyTorch
+  - FastAPI
+  - Android
+  - precision agriculture
