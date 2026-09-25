@@ -3,8 +3,9 @@
    API SERVER
 ===================================================== */
 
+
 const API_BASE_URL =
-    "https://remedies-medication-til-backed.trycloudflare.com";
+    ""// Paste your server API link here;
 
 const PREDICT_URL =
     `${API_BASE_URL}/predict`;
